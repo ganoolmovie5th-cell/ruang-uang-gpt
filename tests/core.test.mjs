@@ -1,0 +1,17 @@
+import test from 'node:test';import assert from 'node:assert/strict';import{empty,demo,validate,balance,monthly,spent,amount,isDate,csv}from'../dist/core.mjs';
+test('Demo data is schema valid',()=>assert.equal(validate(demo('2026-10')).version,1));
+test('Empty state valid and has zero balance',()=>{const s=empty();validate(s);assert.equal(balance(s,'cash'),0)});
+test('Transfer changes two balances but preserves total and cashflow',()=>{const s=empty();s.accounts.push({id:'bank',name:'Bank',kind:'bank',opening:1000,color:'#abcdef'});s.transactions.push({id:'x',type:'transfer',amount:100,account:'bank',to:'cash',category:'',note:'',date:'2026-10-01'});validate(s);assert.equal(balance(s,'bank'),900);assert.equal(balance(s,'cash'),100);assert.equal(monthly(s,'2026-10').income,0);assert.equal(monthly(s,'2026-10').expense,0)});
+test('Income and expenses reconcile with starting balances',()=>{const s=demo('2026-10'),m=monthly(s,'2026-10');assert.equal(m.income,10500000);assert.equal(m.expense,3999000);assert.equal(s.accounts.reduce((n,a)=>n+balance(s,a.id),0),16100000+m.net)});
+test('Month filters exclude other months',()=>assert.equal(monthly(demo('2026-10'),'2026-09').ts.length,0));
+test('Category budget consumption',()=>assert.equal(spent(demo('2026-10'),'2026-10','food'),510000));
+test('Invalid dates including leap year',()=>{assert(isDate('2024-02-29'));assert(!isDate('2026-02-29'));assert(!isDate('2026-13-01'))});
+test('Amounts reject negatives, decimals, NaN, infinity, unsafe numbers',()=>{for(const n of [-1,0,1.5,NaN,Infinity,1e15])assert(!amount(n));assert(amount(0,true));assert(amount(25000))});
+test('Foreign account and same-account transfer rejected',()=>{const s=demo('2026-10');s.transactions[0].account='absent';assert.throws(()=>validate(s));const d=demo('2026-10');const t=d.transactions.find(t=>t.type==='transfer');t.to=t.account;assert.throws(()=>validate(d))});
+test('HTML injection IDs and bad colors rejected on import',()=>{const s=empty();s.accounts[0].id='x" onclick="alert(1)';assert.throws(()=>validate(s));const d=empty();d.accounts[0].color='red;display:none';assert.throws(()=>validate(d))});
+test('Duplicate transaction IDs rejected',()=>{const s=demo();s.transactions.push({...s.transactions[0]});assert.throws(()=>validate(s))});
+test('Duplicate budgets rejected',()=>{const s=demo();s.budgets.push({...s.budgets[0],id:'duplicate'});assert.throws(()=>validate(s))});
+test('Goal allocations cannot exceed goal',()=>{const s=demo();s.goals[0].saved=s.goals[0].target+1;assert.throws(()=>validate(s))});
+test('Bill requires valid account, category and date',()=>{for(const field of ['account','category','day']){const s=demo();s.bills[0][field]=field==='day'?32:'missing';assert.throws(()=>validate(s))}});
+test('Backup roundtrip retains every field',()=>{const s=demo();assert.deepEqual(validate(JSON.parse(JSON.stringify(s))),s)});
+test('CSV quotes notes and protects formula prefixes',()=>{const s=demo();s.transactions[0].note='=HYPERLINK("x")';const v=csv(s,[s.transactions[0]]);assert(v.startsWith('\uFEFF'));assert(v.includes('"\'=HYPERLINK(""x"")"'))});
